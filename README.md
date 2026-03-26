@@ -297,6 +297,18 @@ python setup.py build_ext --inplace # Build CUDA kernels
 - [QJL Reference Implementation](https://github.com/amirzandieh/QJL)
 - [CliffordNet: All You Need is Geometric Algebra](https://arxiv.org/abs/2601.06793) (Jan 2026)
 
+## Citation
+
+```bibtex
+@article{pope2026rotorquant,
+  title={RotorQuant: Clifford Algebra Vector Quantization for LLM KV Cache Compression},
+  author={Pope, John D.},
+  year={2026},
+  url={https://www.scrya.com/rotorquant/},
+  note={Code: https://github.com/scrya-com/rotorquant}
+}
+```
+
 ## License
 
 MIT
