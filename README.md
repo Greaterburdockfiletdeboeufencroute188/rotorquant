@@ -192,20 +192,41 @@ Fused CUDA kernels for 1-bit quantization and attention score computation:
 | `qjl_gqa_score_kernel.cu` | Grouped Query Attention variant |
 | `quantization.cu` | Quantized batched matmul for value reconstruction |
 
-### RotorQuant Fused Kernel
+### RotorQuant Fused Kernels (CUDA + Metal)
 
-Single CUDA kernel for the full RotorQuant pipeline:
+Single fused kernel for the full RotorQuant pipeline on both NVIDIA and Apple Silicon:
 
 ```
 embed -> rotor_sandwich -> quantize -> inverse_sandwich -> extract
 ```
 
-Exploits rotor sparsity (4 of 8 multivector components are zero) to cut FMAs by ~50%. Each thread handles one (batch, group) pair with rotors and codebooks in shared memory.
+Exploits rotor sparsity (4 of 8 multivector components are zero) to cut FMAs by ~50%. Each thread handles one (batch, group) pair with rotors and codebooks in shared/threadgroup memory.
+
+**NVIDIA (CUDA) — RTX PRO 4000 Blackwell:**
+
+| n_vectors | TurboQuant | **RQ CUDA** | Speedup |
+|-----------|-----------|------------|---------|
+| 1,024 | 69 us | **6 us** | 11x faster |
+| 4,096 | 132 us | **12 us** | 11x faster |
+| 16,384 | 740 us | **39 us** | 19x faster |
+
+**Apple Silicon (Metal) — Mac Mini M4:**
+
+| n_vectors | TurboQuant (MPS) | **RQ Metal** | Speedup |
+|-----------|-----------------|-------------|---------|
+| 1,024 | 764 us | **471 us** | 1.6x faster |
+| 4,096 | 6.02 ms | **650 us** | 9.3x faster |
+| 16,384 | 21.94 ms | **1.12 ms** | 19.6x faster |
+| 65,536 | 86.46 ms | **2.76 ms** | 31.3x faster |
 
 Build:
 ```bash
-# Build all CUDA kernels
+# NVIDIA: Build CUDA kernels
 CUDA_HOME=/usr/local/cuda python setup.py build_ext --inplace
+
+# Apple Silicon: Compile Metal shader
+xcrun -sdk macosx metal -c turboquant/rotor_fused.metal -o /tmp/rotor_fused.air -std=metal3.0
+xcrun -sdk macosx metallib /tmp/rotor_fused.air -o turboquant/rotor_fused.metallib
 ```
 
 ## Scripts
@@ -217,6 +238,8 @@ CUDA_HOME=/usr/local/cuda python setup.py build_ext --inplace
 | `validate_rotorquant.py` | RotorQuant vs TurboQuant on real model | `python -m turboquant.validate_rotorquant` |
 | `benchmark_cuda.py` | PyTorch vs QJL CUDA kernel speed | `python -m turboquant.benchmark_cuda` |
 | `benchmark_rotorquant.py` | Full 7-test RotorQuant vs TurboQuant comparison | `python -m turboquant.benchmark_rotorquant` |
+| `benchmark_metal.py` | Metal shader benchmark (Apple Silicon) | `python -m turboquant.benchmark_metal` |
+| `benchmark_mps_bmm.py` | MPS batched 3x3 matmul benchmark | `python -m turboquant.benchmark_mps_bmm` |
 
 ## Project Structure
 
@@ -230,7 +253,8 @@ turboquant/
   compressors.py             # Asymmetric inner product compressors for validation
   cuda_backend.py            # QJL CUDA kernel wrappers with PyTorch fallback
   csrc/
-    rotor_fused_kernel.cu    # Fused RotorQuant CUDA kernel
+    rotor_fused_kernel.cu    # Fused RotorQuant CUDA kernel (NVIDIA)
+  rotor_fused.metal          # Fused RotorQuant Metal shader (Apple Silicon)
     qjl_quant_kernel.cu      # QJL quantization kernel
     qjl_score_kernel.cu      # QJL attention score kernel
     qjl_gqa_score_kernel.cu  # QJL GQA score kernel
