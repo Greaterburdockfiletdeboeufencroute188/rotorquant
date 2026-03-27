@@ -104,29 +104,59 @@ class RotorQuantPatchedCache:
 
 
 def patch_model_kv_cache(model, bits: int = 4, quantize_values: bool = False):
-    """Monkey-patch model's cache update to quantize-dequantize KV on insertion.
+    """Monkey-patch model's cache update for post-prefill RotorQuant compression.
 
+    Strategy:
+      - Prefill: full precision (no quantization, no error compounding)
+      - First decode step: quantize entire prefill cache in bulk
+      - Subsequent decode steps: quantize each new key, return full-precision
+        key for current attention to avoid compounding
+
+    This gives perfect prefill quality + compressed cache for decode.
     Works with any HuggingFace model that uses DynamicCache.
     """
     from transformers import DynamicCache
 
     rq_cache = RotorQuantPatchedCache(bits, "cuda", quantize_values)
+    prefill_done = {}  # per-layer tracking
 
     _original_update = DynamicCache.update
 
-    def _patched_update(self, key_states, value_states, layer_idx, cache_kwargs=None):
+    def _compress_keys(key_states, layer_idx):
         D = key_states.shape[-1]
-
-        # Compress keys
         kc = rq_cache.get_key_compressor(layer_idx, D)
-        key_states = kc.compress_dequantize(key_states)
+        return kc.compress_dequantize(key_states)
 
-        # Optionally compress values
+    def _patched_update(self, key_states, value_states, layer_idx, cache_kwargs=None):
+        new_seq_len = key_states.shape[2]
+        is_prefill = (new_seq_len > 1)
+
+        if is_prefill:
+            # Prefill: store at full precision — no quantization
+            prefill_done[layer_idx] = True
+            return _original_update(self, key_states, value_states, layer_idx, cache_kwargs)
+
+        # Decode: quantize new key for storage, full-precision for current attention
+        key_quantized = _compress_keys(key_states, layer_idx)
+
+        # Optionally quantize values
         if rq_cache.quantize_values:
+            D = value_states.shape[-1]
             vc = rq_cache.get_val_compressor(layer_idx, D)
             value_states = vc.compress_dequantize(value_states)
 
-        return _original_update(self, key_states, value_states, layer_idx, cache_kwargs)
+        k_out, v_out = _original_update(self, key_quantized, value_states, layer_idx, cache_kwargs)
+
+        # Return full-precision key for current token's attention
+        k_out = k_out.clone()
+        k_out[:, :, -1:, :] = key_states
+
+        # On first decode step: quantize all prefill keys in bulk
+        if prefill_done.get(layer_idx) is True:
+            k_out[:, :, :-1, :] = _compress_keys(k_out[:, :, :-1, :], layer_idx)
+            prefill_done[layer_idx] = 'done'
+
+        return k_out, v_out
 
     DynamicCache.update = _patched_update
     return _original_update, rq_cache
