@@ -6,16 +6,17 @@ A from-scratch PyTorch implementation of [TurboQuant](https://arxiv.org/abs/2504
 
 ### RotorQuant High-Context Generation (NEW)
 
-3-bit RotorQuant with post-prefill quantization on Qwen2.5-3B-Instruct:
+3-bit RotorQuant with post-prefill quantization on Qwen2.5-3B-Instruct (RTX 5090):
 
 | Context | Speed | VRAM | Needle-in-Haystack |
 |---------|-------|------|--------------------|
-| 2K | 4.5 tok/s | 2.4 GB | **FOUND** — "AURORA-7749" |
-| 8K | 4.9 tok/s | 3.1 GB | **FOUND** |
-| 16K | 6.4 tok/s | 4.0 GB | **FOUND** |
-| 32K | 1.9 tok/s | 5.9 GB | **FOUND** |
-| 65K | 0.9 tok/s | 9.6 GB | **FOUND** |
-| 93K | 2.2 tok/s | 12.8 GB | **FOUND** (RTX 5090) |
+| 2K | 6.9 tok/s | 2.4 GB | **FOUND** — "AURORA-7749" |
+| 4K | 9.2 tok/s | 2.6 GB | **FOUND** |
+| 8K | 8.6 tok/s | 3.1 GB | **FOUND** |
+| 16K | 6.0 tok/s | 4.0 GB | **FOUND** |
+| 32K | 5.0 tok/s | 5.9 GB | **FOUND** |
+| 65K | 2.1 tok/s | 9.6 GB | **FOUND** |
+| 131K | 0.6 tok/s | 17.1 GB | MISS (model's context limit) |
 
 FP16 baseline: ~40-50 tok/s at short contexts. RotorQuant trades speed for memory at long contexts, enabling fitting much longer sequences in VRAM.
 

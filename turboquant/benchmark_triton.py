@@ -111,9 +111,9 @@ def verify_correctness():
     x_hat_ref, _ = rq(x)
 
     # Triton
-    c_scalar = getattr(rq, 'centroids_scalar')
+    c_scalar = None
     c_vector = getattr(rq, 'centroids_vector')
-    c_bivector = getattr(rq, 'centroids_bivector')
+    c_bivector = None
     c_trivector = getattr(rq, 'centroids_trivector')
 
     x_hat_triton = triton_rotor_full_fused(
@@ -194,9 +194,9 @@ def benchmark_full_fused():
 
     rq = RotorQuantMSE(d, bits, seed=42, device=device)
     packed_rotors = pack_rotors_for_triton(rq.rotors).to(device)
-    c_s = getattr(rq, 'centroids_scalar')
+    c_s = None
     c_v = getattr(rq, 'centroids_vector')
-    c_b = getattr(rq, 'centroids_bivector')
+    c_b = None
     c_t = getattr(rq, 'centroids_trivector')
 
     print(f"  GPU: {torch.cuda.get_device_name()}")
@@ -325,9 +325,9 @@ def benchmark_varying_dimensions():
     for d in [64, 128, 256, 512]:
         rq = RotorQuantMSE(d, bits, seed=42, device=device)
         packed_rotors = pack_rotors_for_triton(rq.rotors).to(device)
-        c_s = getattr(rq, 'centroids_scalar')
+        c_s = None
         c_v = getattr(rq, 'centroids_vector')
-        c_b = getattr(rq, 'centroids_bivector')
+        c_b = None
         c_t = getattr(rq, 'centroids_trivector')
         n_groups = (d + 2) // 3
 
@@ -378,9 +378,9 @@ def benchmark_vs_turboquant():
         tq = TurboQuantMSE(d, bits, seed=42, device=device)
         rq = RotorQuantMSE(d, bits, seed=42, device=device)
         packed_rotors = pack_rotors_for_triton(rq.rotors).to(device)
-        c_s = getattr(rq, 'centroids_scalar')
+        c_s = None
         c_v = getattr(rq, 'centroids_vector')
-        c_b = getattr(rq, 'centroids_bivector')
+        c_b = None
         c_t = getattr(rq, 'centroids_trivector')
 
         for n in [1024, 4096, 16384]:
@@ -434,9 +434,9 @@ def benchmark_bitwidth_sweep():
     for bits in [1, 2, 3, 4]:
         rq = RotorQuantMSE(d, bits, seed=42, device=device)
         packed_rotors = pack_rotors_for_triton(rq.rotors).to(device)
-        c_s = getattr(rq, 'centroids_scalar')
+        c_s = None
         c_v = getattr(rq, 'centroids_vector')
-        c_b = getattr(rq, 'centroids_bivector')
+        c_b = None
         c_t = getattr(rq, 'centroids_trivector')
 
         # Quality
