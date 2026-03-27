@@ -68,28 +68,26 @@ class RotorQuantMSE(nn.Module):
         if grade_bits is None:
             grade_bits = {
                 'vector': bits,
-                'trivector': max(bits - 1, 1),
             }
         self.grade_bits = grade_bits
 
         # Create per-grade codebooks
         # d_eff determines the Lloyd-Max Gaussian σ = 1/√d_eff
         d_eff_vector = d       # vector grades: σ ≈ 1/√d
-        d_eff_trivector = max(d // 2, 8)  # trivector: slightly wider distribution
         self.codebooks = nn.ModuleDict()
         for grade_name, gb in grade_bits.items():
-            if grade_name == 'trivector':
-                cb = LloydMaxCodebook(d_eff_trivector, gb)
-            else:
-                cb = LloydMaxCodebook(d_eff_vector, gb)
+            cb = LloydMaxCodebook(d_eff_vector, gb)
             self.register_buffer(f'centroids_{grade_name}',
                                  cb.centroids.to(device))
 
-        # Only quantize non-zero grades (vector + trivector)
+        # Only quantize grade-1 (vector) components.
+        # Trivector (e123) carries 15% of energy but contributes ZERO to
+        # reconstruction because extract_vectors_from_multivectors only reads
+        # grade-1 (e1, e2, e3). Dropping trivector saves 25% of indices
+        # with zero MSE impact, matching TurboQuant's compression ratio.
         # [scalar, e1, e2, e3, e12, e13, e23, e123]
         self.grade_map = {
             'vector':   [1, 2, 3],
-            'trivector': [7],
         }
 
         # Pre-compute random rotors (one per group for decorrelation)

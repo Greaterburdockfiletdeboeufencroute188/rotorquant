@@ -235,8 +235,10 @@ def _rotor_full_fused_kernel(
     o0, o1, o2, o3, o4, o5, o6, o7 = _gp_mv_rotor(
         t0, t1, t2, t3, t4, t5, t6, t7, r_s, -r_p12, -r_p13, -r_p23)
 
-    # Grade-aware quantization — only non-zero grades (vector + trivector)
-    # Scalar (o0) and bivector (o4,o5,o6) are always zero after sandwich of grade-1 input
+    # Grade-aware quantization — vector only (e1, e2, e3)
+    # Scalar/bivector: always zero after sandwich of grade-1 input
+    # Trivector: non-zero but NEVER READ by extract (only grade-1 is extracted)
+    # Dropping trivector saves 25% of indices with zero MSE impact
     q0 = z  # scalar: always zero
     q1 = _quantize_nearest(o1, c_vector_ptr, n_vector)
     q2 = _quantize_nearest(o2, c_vector_ptr, n_vector)
@@ -244,7 +246,7 @@ def _rotor_full_fused_kernel(
     q4 = z  # bivector: always zero
     q5 = z
     q6 = z
-    q7 = _quantize_nearest(o7, c_trivector_ptr, n_trivector)
+    q7 = z  # trivector: non-zero but unused by extract
 
     # Inverse sandwich: temp2 = R̃ * q, final = temp2 * R
     t0, t1, t2, t3, t4, t5, t6, t7 = _gp_rotor_mv(
