@@ -142,15 +142,15 @@ rq = RotorQuantMSE(d=128, bits=3, device='cuda')
 
 ## Triton Kernels
 
-Portable, auto-tuned GPU kernels (for RotorQuant Clifford path):
+Portable, auto-tuned GPU kernels:
 
 | Kernel | Purpose | Speedup vs PyTorch |
 |--------|---------|-------------------|
-| `triton_rotor_full_fused` | Full quantize-dequantize pipeline | **128-652x** |
-| `triton_rotor_sandwich` | R x R̃ (embed + rotor sandwich) | 80-166x |
+| `triton_rotor_full_fused` | Clifford quantize-dequantize pipeline | **128-652x** |
+| `triton_rotor_sandwich` | Clifford R x R̃ (embed + rotor sandwich) | 80-166x |
 | `triton_fused_attention_qjl` | Q@K^T with QJL correction (experimental) | — |
 
-IsoQuant Triton kernels are planned — the pure PyTorch path is already 5.8x faster than RotorQuant's Triton.
+Note: IsoQuant's pure PyTorch path (727µs at d=128) is already **5.8x faster** than RotorQuant's pure PyTorch (4,244µs). Dedicated IsoQuant Triton kernels will push this further.
 
 ## Scripts
 
