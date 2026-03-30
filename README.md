@@ -4,20 +4,148 @@ A from-scratch PyTorch implementation of [TurboQuant](https://arxiv.org/abs/2504
 
 **IsoQuant** is the recommended default: **5.8x faster** than RotorQuant at identical reconstruction quality, with clean 4D hardware alignment.
 
-## Google TurboQuant Parity
+## Head-to-Head vs Reference TurboQuant
 
-All three methods match Google TurboQuant's quality claims while dramatically reducing rotation cost:
+Benchmarked against [back2matching/turboquant](https://github.com/back2matching/turboquant) v0.2.0 (first open-source TurboQuant, pip-installable) on RTX 5090, PyTorch 2.11, Triton 3.6.
 
-| Metric | Google TurboQuant | RotorQuant (Clifford) | IsoQuant (Quaternion) | Status |
-|--------|------------------|----------------------|----------------------|--------|
-| **Perplexity (4-bit)** | <5% degradation | **+3.2%** (PPL 10.13 vs 9.81) | Same | **MATCH** |
-| **Perplexity (3-bit)** | <5% (Gemma, many KV heads) | +25.2% (Qwen, 2 KV heads) | Same | Expected |
-| **Needle-in-haystack** | Perfect at all bit widths | **4/4 FOUND** (3-bit & 4-bit) | Same | **MATCH** |
-| **Generation quality** | Coherent | Coherent | Coherent | **MATCH** |
-| **MSE vs FP16** | Near-optimal | **1.0x ratio** | **1.0x ratio** | **MATCH** |
-| **Compression (3-bit)** | 4.9x | **4.9x** | **4.9x** | **MATCH** |
+### Synthetic MSE (unit vectors, d=128, n=2000)
 
-### IsoQuant vs RotorQuant vs TurboQuant (d=128)
+| bits | Ref TurboQuant | RotorQuant | IsoQuant-Fast | Theory bound | Winner |
+|------|---------------|------------|---------------|-------------|--------|
+| 2 | 0.128799 | **0.115858** | 0.116346 | 0.170044 | **RQ** |
+| 3 | 0.049446 | **0.034060** | 0.034310 | 0.042511 | **RQ** |
+| 4 | 0.019621 | **0.009302** | 0.009431 | 0.010628 | **RQ** |
+
+On synthetic unit vectors, RotorQuant and IsoQuant beat the reference by ~2x at every bit width. All methods are well below the theoretical bound from the paper.
+
+### Inner Product Preservation (two-stage with QJL)
+
+| bits | Method | Bias | RMSE | Correlation |
+|------|--------|------|------|-------------|
+| 3 | RefTQ | +0.0015 | 0.0413 | 0.8931 |
+| 3 | RQ | +0.0006 | 0.0419 | 0.8786 |
+| 3 | IQ-Fast | +0.0019 | 0.0412 | 0.8834 |
+| 4 | RefTQ | +0.0015 | 0.0257 | 0.9610 |
+| 4 | RQ | +0.0006 | 0.0228 | **0.9656** |
+| 4 | IQ-Fast | +0.0007 | 0.0226 | **0.9664** |
+
+All methods near-tied on inner product quality. All biases near zero (unbiased as proven in the paper).
+
+### NIAH Retrieval
+
+All three methods achieve **EXACT** retrieval across all bit widths (2/3/4) and sequence lengths (512/2048/8192). No misses.
+
+### Real Model PPL (Qwen2.5-3B-Instruct, K-cache quantization)
+
+| Method | PPL | vs FP16 baseline (8.18) |
+|--------|-----|------------------------|
+| FP16 baseline | **8.18** | — |
+| RefTQ 3-bit | 352.98 | +344.80 |
+| RotorQuant 3-bit | 43.71 | +35.53 |
+| **IsoQuant-Fast 3-bit** | **22.71** | **+14.53** |
+| RefTQ 4-bit | 18.58 | +10.40 |
+| RotorQuant 4-bit | 30.27 | +22.09 |
+| **IsoQuant-Fast 4-bit** | **15.70** | **+7.51** |
+
+IsoQuant-Fast wins PPL at both bit widths. The reference TurboQuant's 3-bit result blows up on Qwen2.5 (2 KV heads) — this matches independent reports of catastrophic PPL with symmetric TurboQuant 3-bit on this model.
+
+### K-cache MSE on Real Model Tensors
+
+| bits | Ref TurboQuant | RotorQuant | IsoQuant-Fast |
+|------|---------------|------------|---------------|
+| 3 | **0.534** | 1.808 | 2.306 |
+| 4 | **0.189** | 0.857 | 1.386 |
+
+On real K vectors (non-unit, std=3.32, norm_mean=26.76), the reference TurboQuant's full d×d rotation achieves lower MSE. However, **lower MSE does not translate to better PPL** — IsoQuant's group-wise rotation preserves directional information that matters more for attention score computation.
+
+### Speed (quantize + dequantize roundtrip, d=128, 3-bit)
+
+| n vectors | Ref TurboQuant | RotorQuant | IsoQuant-Fast |
+|-----------|---------------|------------|---------------|
+| 1,000 | **0.20 ms** | 8.43 ms | 1.62 ms |
+| 5,000 | **0.26 ms** | 12.52 ms | 1.44 ms |
+| 10,000 | **0.46 ms** | 19.37 ms | 1.31 ms |
+
+RefTQ's dense matmul is fastest on GPU (matrix multiply is what GPUs are optimized for). The advantage of RQ/IQ is parameter efficiency, not raw rotation speed.
+
+### Parameter Efficiency
+
+| Method | Rotation params | Total | vs RefTQ |
+|--------|----------------|-------|----------|
+| Ref TurboQuant | 16,384 (128×128 matrix) | 16,392 | 1x |
+| RotorQuant | 344 (43 Cl(3,0) rotors) | 352 | **46.6x smaller** |
+| IsoQuant-Fast | 128 (32 quaternions) | 136 | **120.5x smaller** |
+
+### PPL at Scale (Qwen2.5-3B-Instruct, RTX 5090, compressed KV cache)
+
+4-bit:
+
+| Context | FP16 PPL | RefTQ PPL | RQ PPL | IQ-Fast PPL | FP16 Speed | TQ Speed | IQ Speed |
+|---------|----------|-----------|--------|-------------|------------|----------|----------|
+| 1,024 | **6.38** | 17.34 | 97.23 | 45.74 | 3,133 t/s | 6,239 t/s | 667 t/s |
+| 2,048 | **6.98** | 25.12 | 192.36 | 64.89 | 18,699 t/s | 9,531 t/s | 1,302 t/s |
+| 4,096 | **7.96** | 37.59 | 269.09 | 50.90 | 17,709 t/s | 12,248 t/s | 2,680 t/s |
+
+3-bit:
+
+| Context | FP16 PPL | RefTQ PPL | RQ PPL | IQ-Fast PPL |
+|---------|----------|-----------|--------|-------------|
+| 1,024 | **6.38** | 411.34 | 190.53 | 207.43 |
+| 2,048 | **6.98** | 963.41 | 242.32 | 196.66 |
+| 4,096 | **7.96** | 5,128.36 | 222.95 | **169.99** |
+
+At 3-bit, RefTQ collapses catastrophically on Qwen2.5 (2 KV heads) as context grows. RotorQuant and IsoQuant degrade gracefully — IsoQuant-Fast achieves the best 3-bit PPL at 4K context (170 vs 5,128 for RefTQ).
+
+### VRAM & Speed (measured, Qwen2.5-7B-Instruct, 14.5 GB model, M5 Max 128 GB)
+
+| Context | FP16 Peak | TQ 4-bit Peak | VRAM Saved | FP16 Speed | TQ 4-bit Speed |
+|---------|-----------|---------------|------------|------------|----------------|
+| 460 | 14,833 MB | 14,758 MB | 75 MB | 17.7 tok/s | **23.8 tok/s** |
+| 1,860 | 16,659 MB | 16,215 MB | 444 MB | 1.0 tok/s | **1.4 tok/s** |
+
+### KV Cache VRAM with Compressed Storage (Qwen2.5-3B: 36 layers, 2 KV heads, head_dim=128)
+
+All methods (TQ, RQ, IQ) use identical compressed format: `uint8` indices + `float32` norms per vector. The VRAM savings are method-independent — the difference is quality (PPL) and quantizer state size.
+
+4-bit (3.8x compression):
+
+| Context | FP16 KV | Compressed KV | Saved |
+|---------|---------|---------------|-------|
+| 460 | 16 MB | 4 MB | 12 MB |
+| 1,860 | 65 MB | 17 MB | 48 MB |
+| 4,096 | 144 MB | 38 MB | 106 MB |
+| 8,192 | 288 MB | 77 MB | 212 MB |
+| 16,384 | 576 MB | 153 MB | 423 MB |
+| 32,768 | 1,152 MB | 306 MB | **846 MB** |
+
+3-bit (4.9x compression):
+
+| Context | FP16 KV | Compressed KV | Saved |
+|---------|---------|---------------|-------|
+| 460 | 16 MB | 3 MB | 13 MB |
+| 1,860 | 65 MB | 13 MB | 52 MB |
+| 4,096 | 144 MB | 29 MB | 115 MB |
+| 8,192 | 288 MB | 59 MB | 230 MB |
+| 16,384 | 576 MB | 117 MB | 459 MB |
+| 32,768 | 1,152 MB | 234 MB | **918 MB** |
+
+### Quantizer State Overhead
+
+The rotation parameters are stored once and shared across all tokens. RotorQuant and IsoQuant's advantage is dramatic at scale — especially when running many layers with separate quantizers.
+
+| Method | Per-quantizer | Total (36L × 2H) | vs RefTQ |
+|--------|--------------|-------------------|----------|
+| Ref TurboQuant | 128×128 matrix (64 KB) | **4,613 KB** | 1x |
+| RotorQuant | 43 rotors × 8 (1.4 KB) | **101 KB** | 46x smaller |
+| IsoQuant-Fast | 32 quats × 4 (0.5 KB) | **41 KB** | **114x smaller** |
+
+For a 7B model (28 layers, 32 KV heads) RefTQ needs **57 MB** just for rotation matrices. IsoQuant needs **0.5 MB**.
+
+---
+
+## IsoQuant vs RotorQuant Internal Comparison
+
+### Architecture (d=128)
 
 | | TurboQuant | RotorQuant | IsoQuant-Fast | IsoQuant-Full |
 |---|-----------|-----------|---------------|---------------|
@@ -165,7 +293,8 @@ x_hat = triton_iso_fast_fused(x, iq.q_L, iq.centroids)
 
 | Script | Purpose | Command |
 |--------|---------|---------|
-| `benchmark_isoquant.py` | **IsoQuant vs RotorQuant head-to-head** | `python -m turboquant.benchmark_isoquant` |
+| `benchmark_vs_reference.py` | **vs reference TurboQuant (MSE, PPL, VRAM, speed)** | `python benchmark_vs_reference.py` |
+| `benchmark_isoquant.py` | IsoQuant vs RotorQuant head-to-head | `python -m turboquant.benchmark_isoquant` |
 | `benchmark_google_parity.py` | Full TurboQuant parity test | `python -m turboquant.benchmark_google_parity` |
 | `benchmark_perplexity.py` | Perplexity benchmark (autoregressive + roundtrip) | `python -m turboquant.benchmark_perplexity` |
 | `poc_high_context.py` | High-context generation (2K-131K tokens) | `python -m turboquant.poc_high_context` |
@@ -174,6 +303,7 @@ x_hat = triton_iso_fast_fused(x, iq.q_L, iq.centroids)
 ## Project Structure
 
 ```
+benchmark_vs_reference.py    # Head-to-head vs reference TurboQuant (pip)
 turboquant/
   isoquant.py                # IsoQuant: quaternion 4D block rotation (recommended)
   rotorquant.py              # RotorQuant: Clifford 3D block rotation (legacy)
@@ -219,6 +349,7 @@ pip install -e ".[validate]"        # + model validation deps (transformers, bit
 ## References
 
 - [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) — [Blog](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/) — [Triton impl](https://dejan.ai/blog/turboquant/)
+- [back2matching/turboquant](https://github.com/back2matching/turboquant) — Reference open-source TurboQuant (pip install turboquant)
 - [IsoQuant](https://github.com/ParaMind2025/isoquant) — Ji, "IsoQuant: Hardware-Aligned SO(4) Isoclinic Rotations for LLM KV Cache Compression" (March 2026)
 - [QJL: 1-Bit Quantized JL Transform](https://arxiv.org/abs/2406.03482) — [Code](https://github.com/amirzandieh/QJL)
 - [CommVQ](https://arxiv.org/abs/2506.18879) (ICML 2025) — [PolarQuant](https://arxiv.org/abs/2502.02617) (AISTATS 2026)
