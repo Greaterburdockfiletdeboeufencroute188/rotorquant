@@ -13,6 +13,11 @@ QuantProd = IsoQuantProd
 
 # Triton kernels (optional, requires triton >= 3.0)
 try:
+    from .triton_planarquant import (
+        triton_planar2_fused,
+        triton_planar2_quantize,
+        triton_planar2_dequantize,
+    )
     from .triton_isoquant import (
         triton_iso_full_fused,
         triton_iso_fast_fused,
