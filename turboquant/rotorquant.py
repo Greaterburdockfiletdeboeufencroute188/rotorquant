@@ -61,33 +61,35 @@ class RotorQuantMSE(nn.Module):
         self.mv_dim = self.n_groups * MV_DIM  # total components
 
         # Grade-aware bit allocation
-        # Only store non-zero grades: the rotor sandwich R v R̃ of a grade-1
-        # vector produces ONLY odd grades (vector + trivector). Scalar and
-        # bivector are mathematically guaranteed to be zero — don't waste
-        # storage on them. This cuts stored indices from 8/group to 4/group.
+        # The rotor sandwich R v R̃ of a grade-1 vector produces ONLY odd
+        # grades (vector + trivector). Scalar and bivector are zero.
+        # Both vector AND trivector must be quantized for the Triton fused
+        # kernel which operates on the full multivector representation.
         if grade_bits is None:
             grade_bits = {
                 'vector': bits,
+                'trivector': max(bits - 1, 1),
             }
         self.grade_bits = grade_bits
 
         # Create per-grade codebooks
         # d_eff determines the Lloyd-Max Gaussian σ = 1/√d_eff
         d_eff_vector = d       # vector grades: σ ≈ 1/√d
+        d_eff_trivector = max(d // 2, 8)  # trivector: slightly wider distribution
         self.codebooks = nn.ModuleDict()
         for grade_name, gb in grade_bits.items():
-            cb = LloydMaxCodebook(d_eff_vector, gb)
+            if grade_name == 'trivector':
+                cb = LloydMaxCodebook(d_eff_trivector, gb)
+            else:
+                cb = LloydMaxCodebook(d_eff_vector, gb)
             self.register_buffer(f'centroids_{grade_name}',
                                  cb.centroids.to(device))
 
-        # Only quantize grade-1 (vector) components.
-        # Trivector (e123) carries 15% of energy but contributes ZERO to
-        # reconstruction because extract_vectors_from_multivectors only reads
-        # grade-1 (e1, e2, e3). Dropping trivector saves 25% of indices
-        # with zero MSE impact, matching TurboQuant's compression ratio.
+        # Quantize non-zero grades: vector (e1, e2, e3) + trivector (e123)
         # [scalar, e1, e2, e3, e12, e13, e23, e123]
         self.grade_map = {
             'vector':   [1, 2, 3],
+            'trivector': [7],
         }
 
         # Pre-compute random rotors (one per group for decorrelation)

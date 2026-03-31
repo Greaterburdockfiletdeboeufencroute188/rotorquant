@@ -213,6 +213,21 @@ With Triton, both PlanarQuant and IsoQuant converge to **~30µs** — the memory
 | **Gemma-2-2b** | 4 | 8.87 | **9.77** | **+10.1%** | 10.64 | +19.9% |
 | Qwen2.5-3B | 2 | 9.81 | **10.13** | **+3.2%** | 12.28 | +25.2% |
 
+### Perplexity — CUDA/Triton Roundtrip (wikitext-2, Qwen2.5-3B, RTX 5090)
+
+Roundtrip test: keys quantized during forward pass (worst case — compounding errors through layers).
+
+| Method | 3-bit PPL | 4-bit PPL |
+|--------|-----------|-----------|
+| **FP16** | **7.98** | **7.98** |
+| **PlanarQuant** | 67.21 | **25.17** |
+| **IsoQuant-Fast** | **37.51** | 27.66 |
+| RotorQuant | 102.93 | 149.16 |
+
+IsoQuant-Fast is best at 3-bit (PPL 37.51). PlanarQuant is best at 4-bit (PPL 25.17). RotorQuant's Clifford 3D blocks underperform because they only mix 3 elements per group (vs 4 for IsoQuant, 2 for PlanarQuant — but PlanarQuant compensates with more groups).
+
+**Note on Mac Metal PPL**: The llama.cpp Metal results (iso3 PPL 70-155) are worse than CUDA/Triton (iso3 PPL 37.51) because the Metal implementation uses a hand-rolled LCG PRNG that produces different rotation constants than Python's `torch.randn`. The CUDA/Triton path uses the exact same rotation parameters as the Python implementation, giving correct results. The Metal constants need to be regenerated from the Python source to match.
+
 ### High-Context Generation
 
 3-bit with post-prefill quantization on Qwen2.5-3B (RTX 5090):
