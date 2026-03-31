@@ -405,8 +405,9 @@ cmake --build build -j
 ./build/bin/llama-server -m model.gguf --jinja -ngl 99 -fa on \
     --cache-type-k iso3 --cache-type-v iso3 --host 0.0.0.0 --port 8080
 
-# Perplexity
-./build/bin/llama-perplexity -m model.gguf -f wikitext-2-raw-test.txt \
+# Perplexity (pip install datasets if needed)
+python3 -c "from datasets import load_dataset; ds = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test'); open('/tmp/wikitext-2-raw-test.txt','w').write('\n'.join(ds['text']))"
+./build/bin/llama-perplexity -m model.gguf -f /tmp/wikitext-2-raw-test.txt \
     -ngl 99 -c 512 --chunks 20 -fa 1 --cache-type-k iso3 --cache-type-v iso3
 ```
 
