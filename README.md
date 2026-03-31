@@ -382,7 +382,7 @@ pip install -e ".[validate]"        # + model validation deps (transformers, bit
 
 ## llama.cpp Metal Integration (Apple Silicon)
 
-PlanarQuant is available as a native KV cache type in our [llama.cpp fork](https://github.com/johndpope/llama-cpp-turboquant/tree/feature/planarquant-kv-cache), built on [TheTom/llama-cpp-turboquant](https://github.com/TheTom/llama-cpp-turboquant).
+PlanarQuant and IsoQuant are available as native KV cache types in our [llama.cpp fork](https://github.com/johndpope/llama-cpp-turboquant/tree/feature/planarquant-kv-cache), built on [TheTom/llama-cpp-turboquant](https://github.com/TheTom/llama-cpp-turboquant). Three new cache types: `iso3` (recommended), `planar3`, alongside existing `turbo3`/`turbo4`.
 
 ### Build
 
@@ -398,31 +398,59 @@ cmake --build build -j
 ### Run
 
 ```bash
-# Benchmark
-./build/bin/llama-bench -m model.gguf -ngl 99 -ctk planar3 -ctv planar3 -fa 1 -p 512,2048,8192 -n 64
+# Benchmark (iso3 recommended)
+./build/bin/llama-bench -m model.gguf -ngl 99 -ctk iso3 -ctv iso3 -fa 1 -p 512,2048,8192 -n 64
 
 # Inference
 ./build/bin/llama-server -m model.gguf --jinja -ngl 99 -fa on \
-    --cache-type-k planar3 --cache-type-v planar3 --host 0.0.0.0 --port 8080
+    --cache-type-k iso3 --cache-type-v iso3 --host 0.0.0.0 --port 8080
+
+# Perplexity
+./build/bin/llama-perplexity -m model.gguf -f wikitext-2-raw-test.txt \
+    -ngl 99 -c 512 --chunks 20 -fa 1 --cache-type-k iso3 --cache-type-v iso3
 ```
 
-### Benchmarks (M4 Mac Mini 24GB, Qwen2.5-3B Q4_K_M)
+### Perplexity (wikitext-2-raw, 512 ctx, 20 chunks)
 
-| Cache Type | pp512 | pp2K | pp8K | pp16K | Decode (tg64) | vs FP16 decode |
-|-----------|-------|------|------|-------|---------------|----------------|
-| **FP16** | **518** | **459** | **380** | — | **47.4 tok/s** | 100% |
-| **planar3** | **525** | 443 | 313 | 236 | **40.8 tok/s** | **86%** |
-| turbo3 | 387 | 446 | 351 | — | 33.9 tok/s | 72% |
-| turbo4 | 441 | — | — | — | 36.4 tok/s | 77% |
+**Qwen2.5-3B Q4_K_M** (2 KV heads — hardest case):
 
-PlanarQuant decode is **20% faster than TurboQuant** (40.8 vs 33.9 tok/s) because the 2D Givens inverse rotation (4 FMAs per pair) is cheaper than the WHT inverse (7 butterfly stages on 128 elements). All cache types coexist — turbo2/3/4 and planar3 work side by side.
+| Cache | PPL | vs FP16 | Decode tok/s | vs FP16 speed |
+|-------|-----|---------|-------------|---------------|
+| **FP16** | **9.98** | baseline | **47.4** | 100% |
+| **iso3** | **70.2** | +60 | **39.2** | **83%** |
+| turbo3 | 180.3 | +170 | 33.9 | 72% |
+| planar3 | 2143.6 | catastrophic | 40.8 | 86% |
+
+**Qwen2.5-7B Q3_K_M** (stress test — turbo3 known to blow up):
+
+| Cache | PPL | vs FP16 |
+|-------|-----|---------|
+| **FP16** | **8.12** | baseline |
+| **iso3** | **153.5** | +145 |
+| planar3 | 141.6 | +134 |
+| turbo3 | **6564.6** | **catastrophic** |
+
+IsoQuant (iso3) is **2.6x better PPL than turbo3** on 3B and **43x better on 7B**. The quaternion 4D rotation provides much better decorrelation than WHT for low-KV-head models. turbo3 collapses catastrophically on 7B (PPL 6565) while iso3 stays at 153.
+
+### Speed (M4 Mac Mini 24GB, Qwen2.5-3B Q4_K_M)
+
+| Cache Type | pp512 | pp2K | Decode (tg64) | vs FP16 decode |
+|-----------|-------|------|---------------|----------------|
+| **FP16** | **518** | **459** | **47.4 tok/s** | 100% |
+| **iso3** | 500 | 418 | **39.2 tok/s** | **83%** |
+| planar3 | 525 | 443 | 40.8 tok/s | 86% |
+| turbo3 | 387 | 446 | 33.9 tok/s | 72% |
+
+All cache types coexist — turbo2/3/4, planar3, and iso3 work side by side.
 
 ### How it works
 
-The Metal shader implements the full PlanarQuant pipeline:
-- **Quantize** (`kernel_set_rows_planar3`): normalize → forward Givens rotation per pair → 3-bit Lloyd-Max quantize → pack indices
-- **Dequantize** (`dequantize_planar3_0`): unpack indices → centroid lookup → inverse Givens rotation → scale by norm
-- **Flash attention**: non-vec (prefill) + vec (decode) kernel instantiations for dk32–dk576
+Three rotation strategies implemented as Metal shaders:
+- **IsoQuant** (`iso3`): quaternion 4D block rotation — 16 FMAs/group, 32 groups for d=128. Best quality.
+- **PlanarQuant** (`planar3`): 2D Givens rotation — 4 FMAs/pair, 64 pairs. Fastest decode.
+- **TurboQuant** (`turbo3`): Walsh-Hadamard Transform — O(d log d) global mixing. Original.
+
+Each implements: `kernel_set_rows_*` (quantize with forward rotation), `dequantize_*_0` (non-vec FA), `dequantize_*_0_t4` (vec FA for decode).
 
 ## References
 
