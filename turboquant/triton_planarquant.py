@@ -122,22 +122,32 @@ def _planar2_quantize_kernel(
     r0 = cos_t * v0 - sin_t * v1
     r1 = sin_t * v0 + cos_t * v1
 
-    # Find nearest centroid index for each scalar
-    for comp in tl.static_range(2):
-        val = tl.where(comp == 0, r0, r1)
-        best_idx = tl.zeros_like(val, dtype=tl.int32)
-        best_dist = tl.abs(val - tl.load(centroids_ptr))
-        for i in tl.static_range(1, n_levels):
-            c = tl.load(centroids_ptr + i)
-            dd = tl.abs(val - c)
-            mask = dd < best_dist
-            best_dist = tl.where(mask, dd, best_dist)
-            best_idx = tl.where(mask, i, best_idx)
+    # Find nearest centroid index for r0
+    best_idx0 = tl.zeros_like(r0).to(tl.int32)
+    best_dist0 = tl.abs(r0 - tl.load(centroids_ptr))
+    for i in tl.static_range(1, n_levels):
+        c = tl.load(centroids_ptr + i)
+        dd = tl.abs(r0 - c)
+        mask = dd < best_dist0
+        best_dist0 = tl.where(mask, dd, best_dist0)
+        best_idx0 = tl.where(mask, i, best_idx0)
 
-        d_off = d0 + comp
-        tl.store(indices_ptr + pid_b * stride_idx_b + d_off * stride_idx_d,
-                 best_idx.to(tl.int8),
-                 mask=g_mask & (d_off < emb_dim))
+    # Find nearest centroid index for r1
+    best_idx1 = tl.zeros_like(r1).to(tl.int32)
+    best_dist1 = tl.abs(r1 - tl.load(centroids_ptr))
+    for i in tl.static_range(1, n_levels):
+        c = tl.load(centroids_ptr + i)
+        dd = tl.abs(r1 - c)
+        mask = dd < best_dist1
+        best_dist1 = tl.where(mask, dd, best_dist1)
+        best_idx1 = tl.where(mask, i, best_idx1)
+
+    tl.store(indices_ptr + pid_b * stride_idx_b + d0 * stride_idx_d,
+             best_idx0.to(tl.int8),
+             mask=g_mask & (d0 < emb_dim))
+    tl.store(indices_ptr + pid_b * stride_idx_b + (d0 + 1) * stride_idx_d,
+             best_idx1.to(tl.int8),
+             mask=g_mask & ((d0 + 1) < emb_dim))
 
 
 # ── Dequantize-only kernel (indices → reconstructed vectors) ─────────
