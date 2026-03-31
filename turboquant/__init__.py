@@ -18,6 +18,12 @@ try:
         triton_planar2_quantize,
         triton_planar2_dequantize,
     )
+    from .fused_planar_attention import (
+        triton_fused_planar_quantize_attend,
+        triton_planar_cached_attention,
+        pre_rotate_query_planar,
+        PlanarQuantCompressedCache,
+    )
     from .triton_isoquant import (
         triton_iso_full_fused,
         triton_iso_fast_fused,
