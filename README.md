@@ -14,7 +14,19 @@ Drop-in KV cache quantization using rotation-based decorrelation. **4-5x compres
 | M4 Mac Mini | planar3 | 48.3 | 554 | 9.98 |
 | M4 Mac Mini | FP16 | 47.4 | 518 | 9.98 |
 
-**Llama 3.1 8B (RTX 5090):**
+**Llama 3.1 8B Instruct Q4_K_M (RTX 5090, symmetric K+V compression):**
+
+| Cache K | Cache V | PPL (wiki-2) | vs FP16 | Compression |
+|---------|---------|-------------|---------|-------------|
+| f16 | f16 | 6.63 | baseline | 1x |
+| **iso3** | **iso3** | **6.91** | **+4.2%** | **10.3x** |
+| **planar3** | **planar3** | **7.05** | **+6.3%** | **10.3x** |
+| turbo3 | turbo3 | 7.07 | +6.6% | 10.3x |
+| planar3 | turbo3 | 6.68 | +0.8% | 10.3x |
+
+**IsoQuant symmetric 3-bit beats TurboQuant** (PPL 6.91 vs 7.07) while using the same block format and compression ratio. PlanarQuant also beats TurboQuant (7.05 vs 7.07).
+
+**Llama 3.1 8B (K-only deferred, V=F16):**
 
 | Cache K | Decode tok/s | Prefill 2K | PPL |
 |---------|-------------|------------|-----|
@@ -22,7 +34,7 @@ Drop-in KV cache quantization using rotation-based decorrelation. **4-5x compres
 | iso3 | **239** | **13,050** | **8.44** |
 | FP16 | 229 | 9,360 | 8.44 |
 
-With deferred quantization, planar3/iso3 are **3% faster than FP16** (K-cache stays F16 during prefill, no dequant overhead in flash attention) and **PPL matches FP16 exactly**.
+With deferred quantization (K-only), planar3/iso3 are **3% faster than FP16** (K-cache stays F16 during prefill) and **PPL matches FP16 exactly**.
 
 Reproduce:
 ```bash
